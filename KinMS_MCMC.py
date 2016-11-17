@@ -14,7 +14,7 @@ def make_model(param,obspars,rad):
     sbprof = gaussian(rad,param[7],param[8])
     velfunc = interpolate.interp1d([0.0,1,10,200],[0,1,1,1], kind='linear')
     vel=velfunc(rad)*param[6]
-    return KinMS(obspars['xsize'],obspars['ysize'],obspars['vsize'],obspars['dx'],obspars['dy'],obspars['dv'],obspars['beamsize'],param[2],sbprof=sbprof,sbrad=rad,velrad=rad,velprof=vel,nsamps=obspars['nsamps'],intflux=param[0],posang=param[1],gassigma=1.,phasecen=[param[3],param[4]],voffset=param[5],fixseed=True)
+    return KinMS(obspars['xsize'],obspars['ysize'],obspars['vsize'],obspars['cellsize'],obspars['dv'],obspars['beamsize'],param[2],sbprof=sbprof,sbrad=rad,velrad=rad,velprof=vel,nsamps=obspars['nsamps'],intflux=param[0],posang=param[1],gassigma=1.,phasecen=[param[3],param[4]],voffset=param[5],fixseed=True)
 
 
 def lnlike(param,obspars,rad,fdata):
@@ -55,8 +55,7 @@ obspars={}
 obspars['xsize']=64.0
 obspars['ysize']=64.0
 obspars['vsize']=420.0
-obspars['dx']=1.0
-obspars['dy']=1.0
+obspars['cellsize']=1.0
 obspars['dv']=20.0
 obspars['beamsize']=np.array([4.68,3.85,15.54])
 obspars['nsamps']=5e5
