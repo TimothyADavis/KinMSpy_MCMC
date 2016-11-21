@@ -1,38 +1,64 @@
 import numpy as np
 import emcee
 from KinMS import *
-import pdb
+import os.path
+import sys
 import matplotlib.pyplot as plt
 import time
 import multiprocessing
-from KinMS_testsuite import makeplots
-
-def gaussian(x,x0,sigma):
-  return np.exp(-np.power((x - x0)/(sigma), 2.)/2.)
+from makeplots import makeplots
+from make_corner import make_corner
 
 def make_model(param,obspars,rad):
-    sbprof = gaussian(rad,param[7],param[8])
-    velfunc = interpolate.interp1d([0.0,1,10,200],[0,1,1,1], kind='linear')
+    ### This function takes in the `param` array (along with obspars; the observational setup, and a radius vector `rad`) and uses it to create a KinMS model.
+    
+    ### Here we use an exponential disk model for the surface brightness of the gas ###
+    sbprof = np.exp((-1)*rad/param[7]) 
+    
+    ### We use a very simple rotation curve model that peaks at 3 arcseconds then is flat. Vflat is a free parameter here. ###
+    velfunc = interpolate.interp1d([0.0,3,10,200],[0,1,1,1], kind='linear')
     vel=velfunc(rad)*param[6]
+    
+    ### This returns the model
     return KinMS(obspars['xsize'],obspars['ysize'],obspars['vsize'],obspars['cellsize'],obspars['dv'],obspars['beamsize'],param[2],sbprof=sbprof,sbrad=rad,velrad=rad,velprof=vel,nsamps=obspars['nsamps'],intflux=param[0],posang=param[1],gassigma=1.,phasecen=[param[3],param[4]],voffset=param[5],fixseed=True)
+    ###
 
 
 def lnlike(param,obspars,rad,fdata):
+    ### This function calculates the log-likelihood, comparing model and data
+    
+    ### Run make_model to produce a model cube ###
     modout = make_model(param,obspars,rad)
+        
+    ### calculate the chi^2 ###
     chiconv = (((fdata-modout)**2)/((obspars['rms'])**2)).sum() 
+    
+    ### covert to log-likelihood ###
     like= -0.5*(chiconv-fdata.size)
     return like
 
+
 def priors(param,priorarr):
-    outofrange=0
+    ### This function checks if any guess is out of range of our priors.
+    
+    ### initally assume all guesses in range ### 
+    outofrange=0 
+    
+    ### Loop over each parameter ###
     for i in range(0,priorarr[:,0].size):
+        ### If the parameter is out of range of the prior then add one to out of range, otherwise add zero
         outofrange+=1-(priorarr[i,0] <= param[i] <= priorarr[i,1])
+        
     if outofrange:
+        ### If outofrange NE zero at the end of the loop then at least oen parameter is bad, return -inf.
         return -np.inf
     else: 
+        ### Otherwise return zero
         return 0.0
 
+
 def lnprob(param,obspars,rad,fdata,priorarr):
+    ### This function calls the others above, first checking that params are valid, and if so returning the log-likelihood.
     checkprior = priors(param,priorarr)
     if not np.isfinite(checkprior):
         return -np.inf
@@ -40,42 +66,31 @@ def lnprob(param,obspars,rad,fdata,priorarr):
     
 
 
-hdulist = fits.open('test_suite/NGC4324.fits')
-fdata = hdulist[0].data.T
-fdata=fdata[18:82,18:82,:,0]
-rms=np.std(fdata[:,:,0])
+################################################# Main code body starts here #######################################################################
 
-#scidata = hdulist[0].data.T
-#scidata=scidata[18:82,18:82,:,0]
-#scidata[np.where(scidata < rms*4.)]=0.0
-
-
-# ## Setup cube parameters ##
+### Setup cube parameters ###
 obspars={}
-obspars['xsize']=64.0
-obspars['ysize']=64.0
-obspars['vsize']=420.0
-obspars['cellsize']=1.0
-obspars['dv']=20.0
-obspars['beamsize']=np.array([4.68,3.85,15.54])
-obspars['nsamps']=5e5
-obspars['rms']=rms
+obspars['xsize']=64.0 # arcseconds
+obspars['ysize']=64.0 # arcseconds
+obspars['vsize']=500.0 # km/s
+obspars['cellsize']=1.0 # arcseconds/pixel
+obspars['dv']=20.0 # km/s/channel
+obspars['beamsize']=np.array([4.0,4.0,0]) # [bmaj,bmin,bpa] in (arcsec, arcsec, degrees)
+obspars['nsamps']=5e5 # Number of cloudlets to use for KinMS models
+obspars['rms']=1e-3 # RMS of data. Here we have a `perfect` model so this is arbitary - when fitting real data this should be the observational RMS
+
+### Setup a radius vector ###
 rad=np.arange(0.,64.)
 
 
-ndim, nwalkers = 9, 18
-nsamps=3000
-
-param=np.zeros(ndim)
-priorarr=np.zeros((ndim,2))
-
-labels=["intflux","posang","inc",'centx','centy','voffset',"vflat","r-ring","rrad"]
+### Make guesses for the parameters, and set prior ranges ###
+labels=["intflux","posang","inc",'centx','centy','voffset',"vflat","discscale"] #name of each variable, for plot
 intflux= 30        # Best fitting total flux
 minintflux= 1.             # lower bound total flux
 maxintflux= 50.            # upper bound total flux
 posang= 50.              # Best fit posang.
-minposang= 0.           # Min posang.
-maxposang= 360.           # Max posang.
+minposang= 30.           # Min posang.
+maxposang= 70.           # Max posang.
 inc= 65.                   # degrees
 mininc=50.                # Min inc
 maxinc=89.                # Max inc
@@ -91,51 +106,78 @@ maxvoffset=+20.0          # max velocity centroid
 vflat =  175.41546             # vflat
 min_vflat=10              # Lower range vflat
 max_vflat=300             # Upper range vflat
-r_ring=20.0               # ring radius
-minr_ring=10.              # Lower ring radius
-maxr_ring=25.              # Upper ring radius
-rrad=2.
-minrrad=0.
-maxrrad=6.
+discscale=10              # Disc exponential scale length
+mindiscscale=1            # Min Disc exponential scale length
+maxdiscscale=20.          # Max Disc exponential scale length
 
-param=[intflux,posang,inc,centx,centy,voffset,vflat,r_ring,rrad]
-priorarr[:,0]=[minintflux,minposang,mininc,mincentx,mincenty,minvoffset,min_vflat,minr_ring,minrrad]
-priorarr[:,1]=[maxintflux,maxposang,maxinc,maxcentx,maxcenty,maxvoffset,max_vflat,maxr_ring,maxrrad]
-param=[  28.67937687,   48.18815941,   64.90943316,   -0.59164278,
-         -0.26750091,   -3.27557838,  177.07797686,   21.1840498 ,
-          3.83618746]
+### starting best guess ###
+param=np.array([intflux,posang,inc,centx,centy,voffset,vflat,discscale]) 
+
+### Setup array for priors - in this code all priors are uniform ###
+priorarr=np.zeros((param.size,2))
+priorarr[:,0]=[minintflux,minposang,mininc,mincentx,mincenty,minvoffset,min_vflat,mindiscscale] # Minimum
+priorarr[:,1]=[maxintflux,maxposang,maxinc,maxcentx,maxcenty,maxvoffset,max_vflat,maxdiscscale] # Maximum
+
+
+### Setup MCMC ###
+ndim = param.size # How many parameters to fit
+nwalkers = ndim*2 # Minimum of 2 walkers per free parameter
+mcmc_steps=3000 # How many sample you want to take of the PDF. 3000 is reasonable for a test, larger the better for actual parameter estimation.
+nsteps = mcmc_steps/nwalkers # Each walker must take this many steps to give a total of mcmc_steps steps
+
+
+### Create a model to fit. Here this is made using the make_model function. In reality you would load in your observational data ###
+real= param  # save the parameters used to make the real model
+fdata=make_model(real,obspars,rad)
+
+
+### How many CPUs to use. Here I am allowing half of the CPUs. Change this if you want more/less.
+cpus2use=np.int(multiprocessing.cpu_count()/2)
+
+### Do a test to estimate how long it will take to run the whole code ###
 t0=time.time()
 for i in range(0,10): fsim=make_model(param,obspars,rad)
-t1=time.time()
-print("Model takes",((t1-t0)/10.),"seconds")
-print("Total runtime expected with",multiprocessing.cpu_count(),"processors:",(((t1-t0)/10.)*nsamps)/(0.6*multiprocessing.cpu_count()))
-
-# print(lnprob(param,obspars,rad,fdata,priorarr))
+t1=time.time() 
+print("One model takes",((t1-t0)/10.),"seconds")
+print("Total runtime expected with",cpus2use,"processors:",(((t1-t0)/10.)*mcmc_steps)/(0.6*cpus2use)) #This formula is a rough empirical estimate that works on my system. Your mileage may vary!
 
 
-#makeplots(fsim,obspars['xsize'],obspars['ysize'],obspars['vsize'],obspars['dx'],obspars['dy'],obspars['dv'],obspars['beamsize'],rms=obspars['rms'],overcube=fdata,posang=270.)
-# print("[Initial model - close plot to continue]")
-
-
-print(lnprob(param,obspars,rad,fdata,priorarr))
+### Show what the initial model and data look like
+makeplots(fsim,obspars['xsize'],obspars['ysize'],obspars['vsize'],obspars['cellsize'],obspars['dv'],obspars['beamsize'],rms=obspars['rms'],posang=real[1],overcube=fdata)
+print("[Initial model - close plot to continue]")
 
 
 
-pos = [param + 1e-4*np.random.randn(ndim) for i in range(nwalkers)]
 
+### Code to run the MCMC
 t0=time.time()
-sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(obspars,rad,fdata,priorarr),threads=multiprocessing.cpu_count())
-sampler.run_mcmc(pos, nsamps/nwalkers)
+pos = [param + 1e-4*np.random.randn(ndim) for i in range(nwalkers)] # walkers start in tight ball around initial guess 
+sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, args=(obspars,rad,fdata,priorarr),threads=cpus2use) # Setup the sampler
+
+### Create a new output file, with the next free number ###
+num=0
+chainstart="KinMS_MCMCrun"
+chainname=chainstart+str(num)+".dat"
+while os.path.isfile(chainname):
+    num+=1
+    chainname=chainstart+str(num)+".dat"
+f = open(chainname, "w")
+f.close()
+
+
+### Run the samples, while outputing a progress bar to the screen, and writing progress to the file.
+width = 30
+for i, result in enumerate(sampler.sample(pos, iterations=nsteps)):
+    position = result[0]
+    n = int((width+1) * float(i) / nsteps)
+    sys.stdout.write("\r[{0}{1}]".format('#' * n, ' ' * (width - n)))
+    f = open(chainname, "a")
+    for k in range(position.shape[0]):
+        f.write("{0:4d} {1:s}\n".format(k, " ".join(map(str, position[k]))))
+    f.close()
+sys.stdout.write("\n")         
 t1=time.time()
 print("It took",t1-t0,"seconds")
 
-samples = sampler.chain[:, 30:, :].reshape((-1, ndim))
-import corner
-fig = corner.corner(samples, labels=labels, truths=param)
-plt.show()
-
-mymap = map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]),zip(*np.percentile(samples, [16, 50, 84],axis=0)))
-bestfit=np.array(list(mymap))
-print(bestfit)
-print(bestfit[:,0])
-pdb.set_trace()
+### Make corner plot (note that this includes all the samples - without a burn-in removed! Set discard to remove the first N samples)
+corner=make_corner(filename=chainname,discard=0,labels=labels,truths=real)
