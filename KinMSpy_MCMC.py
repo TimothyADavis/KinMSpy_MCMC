@@ -20,7 +20,7 @@ def make_model(param,obspars,rad):
     vel=velfunc(rad)*param[6]
     
     ### This returns the model
-    return KinMS(obspars['xsize'],obspars['ysize'],obspars['vsize'],obspars['cellsize'],obspars['dv'],obspars['beamsize'],param[2],sbprof=sbprof,sbrad=rad,velrad=rad,velprof=vel,nsamps=obspars['nsamps'],intflux=param[0],posang=param[1],gassigma=1.,phasecen=[param[3],param[4]],voffset=param[5],fixseed=True)
+    return KinMS(obspars['xsize'],obspars['ysize'],obspars['vsize'],obspars['cellsize'],obspars['dv'],obspars['beamsize'],param[2],sbProf=sbprof,sbRad=rad,velRad=rad,velProf=vel,nSamps=obspars['nsamps'],intFlux=param[0],posAng=param[1],gasSigma=1.,phaseCen=[param[3],param[4]],vOffset=param[5],fixSeed=True)
     ###
 
 
